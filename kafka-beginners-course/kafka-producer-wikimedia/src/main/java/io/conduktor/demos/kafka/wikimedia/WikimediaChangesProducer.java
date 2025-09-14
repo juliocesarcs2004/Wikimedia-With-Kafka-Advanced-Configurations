@@ -9,6 +9,11 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import java.net.URI;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import okhttp3.OkHttpClient;
+import okhttp3.Interceptor;
+import okhttp3.Request;
+import okhttp3.Response;
+import java.io.IOException;
 
 public class WikimediaChangesProducer {
 
@@ -29,7 +34,22 @@ public class WikimediaChangesProducer {
 
         EventHandler eventHandler = new WikimediaChangeHandler(producer, topic);
         String url = "https://stream.wikimedia.org/v2/stream/recentchange";
-        EventSource.Builder builder = new EventSource.Builder(eventHandler, URI.create(url));
+
+        // Adiciona interceptor de User-Agent
+        OkHttpClient client = new OkHttpClient.Builder()
+                .addInterceptor(new Interceptor() {
+                    @Override
+                    public Response intercept(Chain chain) throws IOException {
+                        Request original = chain.request();
+                        Request requestWithUserAgent = original.newBuilder()
+                                .header("User-Agent", "WikimediaKafkaProducer/1.0")
+                                .build();
+                        return chain.proceed(requestWithUserAgent);
+                    }
+                })
+                .build();
+
+        EventSource.Builder builder = new EventSource.Builder(eventHandler, URI.create(url)).client(client);
         EventSource eventSource = builder.build();
 
 
