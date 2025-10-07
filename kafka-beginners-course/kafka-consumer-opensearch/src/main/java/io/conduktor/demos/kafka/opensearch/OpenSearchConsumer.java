@@ -81,12 +81,22 @@ public class OpenSearchConsumer {
             properties.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
             properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
             properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+            properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
 
             // create a consumer
             return new KafkaConsumer<>(properties);
 
         }
 
+    public static String extractId(String json){
+        //gson library
+        return JsonParser.parseString(json)
+                .getAsJsonObject()
+                .get("meta")
+                .getAsJsonObject()
+                .get("id")
+                .getAsString();
+    }
 
     public static void main(String[] args) throws IOException {
 
@@ -121,16 +131,48 @@ public class OpenSearchConsumer {
                 int recordCount = records.count();
                 log.info("Received " + recordCount + " record(s)");
 
+                BulkRequest bulkRequest = new BulkRequest();
+
                 for (ConsumerRecord<String, String> record : records) {
 
                     // send the record into OpenSearch
 
-                    IndexRequest indexRequest = new IndexRequest("wikimedia")
-                            .source(record.value(), XContentType.JSON);
+                    // strategy 1
+                    // define an ID using Kafka Record coordinates
+                    //  String id = record.topic() + "_" + record.partition() + "_" + record.offset();
 
-                    IndexResponse response = openSearchClient.index(indexRequest, RequestOptions.DEFAULT);
+                    try {
+                        // strategy 2
+                        // we extract the ID from the JSON value
+                        String id = extractId(record.value());
 
-                    log.info(response.getId());
+                        IndexRequest indexRequest = new IndexRequest("wikimedia")
+                                .source(record.value(), XContentType.JSON)
+                                .id(id);
+
+                       // IndexResponse response = openSearchClient.index(indexRequest, RequestOptions.DEFAULT);
+
+                        bulkRequest.add(indexRequest);
+
+                       // log.info(response.getId());
+                    } catch(Exception e){
+
+                    }
+                }
+
+                if(bulkRequest.numberOfActions() > 0) {
+                    BulkResponse bulkResponse = openSearchClient.bulk(bulkRequest, RequestOptions.DEFAULT);
+                    log.info("Inserted " + bulkResponse.getItems().length + " records");
+
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+
+                    // commit offsets after the batch consume
+                    consumer.commitSync();
+                    log.info("Offsets have been committed!");
 
                 }
 
