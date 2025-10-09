@@ -108,6 +108,24 @@ public class OpenSearchConsumer {
         // create our Kafka Client
         KafkaConsumer<String, String> consumer = createKafkaConsumer();
 
+        // get a reference to the main thread
+        final Thread mainThread = Thread.currentThread();
+
+        // adding the shutdown hook
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            public void run() {
+                log.info("Detected a shutdown, let's exit by calling consumer.wakeup()...");
+                consumer.wakeup();
+
+                // join the main thread to allow execution of the code in the main thread
+                try {
+                    mainThread.join();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+
         // we need to create the index on OpenSearch if it doesn't exist already
         try(openSearchClient; consumer){
 
@@ -178,11 +196,15 @@ public class OpenSearchConsumer {
 
             }
 
+        } catch (WakeupException e) {
+            log.info("Consumer is starting to shut down");
+        } catch (Exception e){
+            log.error("Unexpected exception in the consumer", e);
+        } finally {
+            consumer.close(); // close the consumer, this will also commit offsets
+            openSearchClient.close();
+            log.info("The consumer is now gracefully shut down");
         }
-
-        // main code logic
-
-        // close things
     }
 }
 
